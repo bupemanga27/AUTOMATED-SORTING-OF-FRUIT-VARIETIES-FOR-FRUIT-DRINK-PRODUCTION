@@ -1,0 +1,143 @@
+import os
+import cv2
+import tensorflow as tf
+import numpy as np
+import random
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+
+TRAIN_DIR = r'C:\Users\User\Desktop\dataset\dataset\train'
+TEST_DIR = r'C:\Users\User\Desktop\dataset\dataset\test'
+CATEGORIES = ["freshoranges", "rottenoranges"]
+
+IMG_SIZE = 50
+
+def create_data_from_directory(data_directory, categories):
+    data = []
+    for category in categories:
+        path = os.path.join(data_directory, category)
+        class_num = categories.index(category)
+        for img in tqdm(os.listdir(path)):
+            try:
+                img_array = cv2.imread(os.path.join(path, img))  # Remove cv2.IMREAD_GRAYSCALE
+                new_array = cv2.resize(img_array, (IMG_SIZE, IMG_SIZE))
+                data.append([new_array, class_num])
+            except Exception as e:
+                pass  
+    return data
+
+# Create training and testing data
+train_data = create_data_from_directory(TRAIN_DIR, CATEGORIES)
+test_data = create_data_from_directory(TEST_DIR, CATEGORIES)
+
+# Shuffle the datasets
+random.shuffle(train_data)
+random.shuffle(test_data)
+
+# Separate features and labels
+def separate_data(data):
+    X = [] # features
+    y = [] # labels
+    for features, label in data:
+        X.append(features)
+        y.append(label)
+    # Reshape X to fit the model input requirement and normalize
+    X = np.array(X).reshape(-1, IMG_SIZE, IMG_SIZE, 3)
+    X = X / 255.0  # Normalization remains the same
+    return X, np.array(y)
+
+
+# Separate training and test sets
+X_train, y_train = separate_data(train_data)
+X_test, y_test = separate_data(test_data)
+
+# Define the CNN model
+model = tf.keras.Sequential([
+    tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMG_SIZE, IMG_SIZE, 3)),
+    tf.keras.layers.MaxPooling2D(2, 2),
+    tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+    tf.keras.layers.MaxPooling2D(2, 2),
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(128, activation='relu'),
+    tf.keras.layers.Dense(2, activation='softmax')  # Use softmax for multi-class classification
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+model.fit(X_train, y_train, epochs=10, validation_data=(X_test, y_test))
+
+# Save the model
+model.save('oranges-cnn.model')
+
+# Prediction function
+def prepare(filepath):
+    IMG_SIZE = 50 
+    img_array = cv2.imread(filepath)  
+    new_array = cv2.resize(img_array, (IMG_SIZE, IMG_SIZE))
+    return new_array.reshape(-1, IMG_SIZE, IMG_SIZE, 3) / 255.0  # Note the '3' for color channels
+
+# Load the model
+new_model = tf.keras.models.load_model('oranges-cnn.model')
+
+# Predict function
+def predict_specific_category_range(datadir, category, model, start_index, end_index):
+    path = os.path.join(datadir, category)
+    for img in os.listdir(path)[start_index:end_index]:  # Predict on a specific range
+        img_path = os.path.join(path, img)
+        print("\n", img)
+        prediction = model.predict([prepare(img_path)])
+        if prediction[0][1] >= 0.5:
+            print("--> ROTTEN\n")
+        else:
+            print("--> FRESH\n")
+
+def display_image_from_dataset(data_directory, categories, display_size=200):
+    for category in categories:
+        path = os.path.join(data_directory, category)
+        plt.figure(figsize=(10, 10))  # Set the figure size to be large enough to see details
+        for img in os.listdir(path):
+            img_path = os.path.join(path, img)
+            img_array = cv2.imread(img_path)
+
+            # Resize for display using cubic interpolation
+            display_array = cv2.resize(img_array, (display_size, display_size), interpolation=cv2.INTER_CUBIC)
+
+            plt.imshow(cv2.cvtColor(display_array, cv2.COLOR_BGR2RGB))
+            plt.title(category)
+            plt.axis('off')  # Hide the axes
+            plt.show()
+            break
+
+# Call the function to display images with specified display size
+display_image_from_dataset(TRAIN_DIR, CATEGORIES, display_size=200)
+
+
+
+# Define a directory and category
+category = "freshoranges" 
+path = os.path.join(TRAIN_DIR, category)
+
+# Get a list of images in the directory
+images = os.listdir(path)
+
+# Ensure there's at least one image
+if images:
+    img_path = os.path.join(path, images[0])  # Use the first image found
+    img_array = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    img_array = cv2.resize(img_array, (IMG_SIZE, IMG_SIZE))
+    plt.imshow(img_array, cmap='gray') # Show the image
+    plt.title(category)
+    plt.show()
+
+
+            
+print("Predictions for a specific range of 'rottenoranges':")
+predict_specific_category_range(TRAIN_DIR, "rottenoranges", new_model, 40, 60)
+
+
+# Evaluate the model on test data
+results = new_model.evaluate(X_test, y_test, batch_size=128)
+print('Test loss, Test accuracy:', results)
